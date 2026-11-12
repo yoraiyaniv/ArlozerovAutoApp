@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { openStore } from './store.mjs';
 import { Fizikal } from './fizikal.mjs';
 import { Scheduler } from './scheduler.mjs';
-import { shiftDate } from './time.mjs';
+import { israelDate, shiftDate } from './time.mjs';
 const YEAR = 365 * 86400000;
 const digest = token => createHash('sha256').update(token).digest('hex');
 const publicClass = ({ raw, ...a }) => a;
@@ -35,8 +35,7 @@ export class Accounts {
     };
     client.reauthenticate = async () => { await memberReady(); return true; };
     scheduler.connect = memberReady;
-    const schedule = async (start, days = 1, force = false) => {
-      await memberReady();
+    const load = async (start, days, force) => {
       const key = `calendar:${start}:${days}`, saved = store.get(key);
       const cached = saved ? JSON.parse(saved) : null;
       const refresh = () => {
@@ -47,10 +46,28 @@ export class Accounts {
         return calendarLoads.get(key);
       };
       if (cached && !force) {
-        if (this.now() - cached.fetchedAt > 30000) refresh().catch(() => {});
+        if (this.now() - cached.fetchedAt > 30000) memberReady().then(refresh).catch(() => {});
         return { ...cached, stale: this.now() - cached.fetchedAt > 30000 };
       }
-      try { return await refresh(); } catch (e) { if (cached) return { ...cached, stale: true }; throw e; }
+      await memberReady();
+      try { return await refresh(); } catch (e) { if (cached) return { ...cached, stale: true, failed: true }; throw e; }
+    };
+    // Fizikal takes seconds per day, so save the coming week in the background after a user request.
+    let warmedAt = 0, warming = false;
+    const warm = async () => {
+      const first = israelDate(this.now());
+      for (let i = 0; i < 7; i++) {
+        const day = shiftDate(first, i), saved = store.get(`calendar:${day}:1`);
+        if (saved && this.now() - JSON.parse(saved).fetchedAt < 300000) continue;
+        try { await load(day, 1, true); } catch { return; }
+      }
+    };
+    const schedule = async (start, days = 1, force = false) => {
+      const result = await load(start, days, force);
+      if (this.workers && !force && !warming && this.now() - warmedAt > 300000) {
+        warmedAt = this.now(); warming = true; warm().finally(() => { warming = false; });
+      }
+      return result;
     };
     const context = { account, store, client, scheduler, bookingLocks, schedule, memberReady };
     this.contexts.set(account.id, context);
