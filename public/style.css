@@ -2,3 +2,60 @@
 .booking-mode{display:flex;flex-wrap:wrap;gap:12px;border:1px solid #dfe6db;border-radius:7px;padding:14px;margin:16px 0;font-size:12px}.booking-mode legend{font-size:10px;color:#84917c;padding:0 5px}.booking-mode label{display:flex;align-items:center;gap:7px;flex:1}.booking-mode input{accent-color:#204d43}#bookings-list{margin-top:20px}@media(max-width:760px){.sidebar{gap:8px}.sidebar nav{gap:0}.nav{padding:7px}.booking-mode{font-size:11px;gap:7px}}
 .occupancy{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:9px;color:#6d7d70;font-size:10px}.full-badge{background:#e8e9e8;color:#656a67;border-radius:4px;padding:3px 7px;font-size:9px;font-weight:600}.class-row.is-full .class-stripe{background:#a2a7a4}.class-row.is-full{background:#fafafa}.class-row.is-full .status{color:#777d79}.class-row.is-full .status i{background:#9ba19d}.waitlist-button{border-color:#d7dad7;background:#f0f1f0;color:#646d67}.class-row.is-full .occupancy{color:#737b75}@media(max-width:760px){.occupancy{font-size:9px;gap:5px}.full-badge{font-size:8px;padding:2px 5px}}
 .install-button{width:100%;margin-bottom:16px}.offline-page{margin:10vh auto;padding:30px;max-width:480px}.offline-page p{line-height:1.8;color:#7e8984}.offline-page a{display:inline-block;margin-top:20px;text-decoration:none}@media(max-width:760px){.install-button{width:auto;margin:0;font-size:9px;padding:8px}.sidebar-bottom{display:flex;align-items:center;gap:9px}.sidebar{padding-top:max(16px,env(safe-area-inset-top));padding-left:max(16px,env(safe-area-inset-left));padding-right:max(16px,env(safe-area-inset-right))}.content{padding-bottom:max(20px,env(safe-area-inset-bottom))}}
+@media(max-width:760px){
+.sidebar{position:sticky;top:0;z-index:5;justify-content:space-between;gap:12px;padding:max(10px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) 10px max(18px,env(safe-area-inset-left))}
+.sidebar nav{position:fixed;left:0;right:0;bottom:0;z-index:20;margin:0;display:grid;grid-template-columns:repeat(4,1fr);gap:2px;background:#fff;border-top:1px solid var(--line);padding:6px 8px max(8px,env(safe-area-inset-bottom))}
+.nav{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:12px;line-height:1.1;padding:9px 0;border-radius:12px;text-align:center}
+.nav span{font-size:22px;width:auto;line-height:1}
+.install-button{font-size:12px;padding:9px 12px;border-radius:10px}
+.avatar{width:40px;height:40px;font-size:18px}
+.content{padding:6px 20px calc(96px + env(safe-area-inset-bottom))}
+.page-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 0 18px}
+.page-heading .button{margin:0}
+h1{font-size:42px;letter-spacing:-2.2px;line-height:1.1;margin:0}
+#refresh{width:46px;height:46px;padding:0;border-radius:50%;font-size:22px}
+#refresh .wide{display:none}
+.banner{font-size:13px;line-height:1.5;padding:12px 14px;margin-bottom:16px}
+.schedule-panel{border:0;background:none;border-radius:0;overflow:visible}
+.schedule-toolbar{padding:0 0 12px;gap:12px;align-items:stretch}
+.week-picker{width:100%;justify-content:space-between;gap:8px}
+.week-picker h2{flex:1;text-align:center;font-size:15px}
+.week-picker button{width:44px;height:44px;border-radius:12px;font-size:24px}
+.week-picker .today{width:auto;height:44px;font-size:12px;padding:0 14px;margin:0}
+.filters{width:100%;gap:8px}
+.search{flex:1;padding:0 12px;min-height:44px;border-radius:12px}
+.search input,.field input,select{font-size:16px}
+select{max-width:130px;min-height:44px;border-radius:12px;padding:0 8px}
+.days{background:none;border:0;padding:4px 0 12px;gap:5px}
+.day{padding:10px 0;min-height:62px;border-radius:12px}
+.day small{font-size:12px}
+.day strong{font-size:20px}
+.class-list{padding:0;max-height:none;overflow:visible}
+.class-row{grid-template-columns:56px 3px minmax(0,1fr) auto;gap:12px;padding:16px 0}
+.class-time strong{font-size:18px}
+.class-time small{font-size:12px}
+.class-details h3{font-size:17px;line-height:1.35;margin-bottom:4px}
+.class-details p{font-size:13px}
+.occupancy{font-size:12px;margin-top:6px}
+.full-badge{font-size:11px}
+.repeat{font-size:14px;font-weight:600;padding:0 14px;min-height:44px;border-radius:12px}
+#bookings-list{margin-top:12px}
+#refresh-bookings{width:100%;min-height:46px;font-size:14px;border-radius:12px}
+.rule-card,.job-card{padding:18px;border-radius:14px}
+.rule-card h3,.job-card h3{font-size:18px;line-height:1.35}
+.rule-card p,.job-card p{font-size:14px}
+.card-actions{align-self:stretch;width:100%}
+.card-actions button{flex:1;min-height:44px;font-size:14px;border-radius:10px}
+.rule-card>.button{width:100%;margin:0;min-height:46px;font-size:14px;border-radius:10px}
+.job-status{font-size:13px}
+.empty{padding:48px 12px;font-size:15px}
+dialog{width:100%;max-width:100%;margin:auto 0 0;border-radius:22px 22px 0 0;padding:22px 20px calc(22px + env(safe-area-inset-bottom));max-height:92vh;overflow:auto}
+dialog h2{font-size:26px;margin:12px 0 18px}
+.booking-mode{flex-direction:column;gap:0;font-size:15px}
+.booking-mode label{flex:none;padding:11px 0}
+.check{font-size:15px;padding:13px 0}
+.muted,.window-note,.booking-explanation p{font-size:13px}
+.button.full{min-height:52px;font-size:16px;border-radius:12px}
+#toast{left:16px;right:16px;bottom:calc(92px + env(safe-area-inset-bottom));transform:none;text-align:center;font-size:14px}
+}
+.close{margin-left:auto}

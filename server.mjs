@@ -7,7 +7,7 @@ import { Accounts, sessionCookie } from './accounts.mjs';
 import { Fizikal } from './fizikal.mjs';
 import { israelDate, shiftDate, matches } from './time.mjs';
 import { singleBooking, cancelBooking } from './bookings.mjs';
-import { validSubscription } from './push.mjs';
+import { validSubscription, manualNotice, ruleNotice } from './push.mjs';
 const root = dirname(fileURLToPath(import.meta.url));
 function send(res, code, data) { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); }
 async function body(req) {
@@ -85,6 +85,7 @@ return http.createServer(async (req, res) => {
         }
         const result = cancelling ? await cancelBooking(client, key, date) : await singleBooking(client, key, date, waitlist);
         if (!cancelling) store.db.prepare('UPDATE jobs SET status=?,message=?,updatedAt=? WHERE key=?').run(result.status, 'One-time registration confirmed by club', Date.now(), key);
+        if (!result.already) accounts.push.notify(store, manualNotice(result, key)).catch(() => {});
         return send(res, 200, result);
       } finally { bookingLocks.delete(key); }
     }
@@ -157,14 +158,17 @@ return http.createServer(async (req, res) => {
       const rule = { id: randomUUID(), lessonId: a.lessonId, name: a.name, weekday: a.weekday, time: a.time, instructor: a.instructor, instructorId: a.instructorId, waitlist, pinInstructor, enabled: true, createdAt: Date.now(), ...(once ? { once: a.key, startsAt: a.startsAt } : {}) };
       store.db.prepare('INSERT INTO rules VALUES (?,?)').run(rule.id, JSON.stringify(rule));
       scheduler.lastSync = 0;
+      accounts.push.notify(store, ruleNotice('saved', rule, scheduler.live)).catch(() => {});
       return send(res, 201, { rule });
     }
     if (url.pathname.startsWith('/api/rules/') && ['PATCH', 'DELETE'].includes(req.method)) {
       const id = url.pathname.slice('/api/rules/'.length), rule = store.rules().find(r => r.id === id);
       if (!rule) return send(res, 404, { error: 'Rule not found' });
-      if (req.method === 'DELETE') store.db.prepare('DELETE FROM rules WHERE id=?').run(id);
+      let notice;
+      if (req.method === 'DELETE') { store.db.prepare('DELETE FROM rules WHERE id=?').run(id); notice = 'removed'; }
       else {
         const change = await body(req);
+        if ('enabled' in change && change.enabled !== rule.enabled) notice = change.enabled ? 'resumed' : 'paused';
         for (const key of ['enabled', 'waitlist', 'pinInstructor']) if (key in change) {
           if (typeof change[key] !== 'boolean') return send(res, 400, { error: 'Invalid rule setting' }); rule[key] = change[key];
         }
@@ -174,7 +178,9 @@ return http.createServer(async (req, res) => {
       store.db.prepare("UPDATE jobs SET status='cancelled',message='Weekly rule changed' WHERE ruleId=? AND status IN ('pending','retry')").run(id);
       // Future cancelled occurrences may be re-created explicitly when resuming.
       if (req.method === 'PATCH' && rule.enabled) store.db.prepare("DELETE FROM jobs WHERE ruleId=? AND status='cancelled' AND dueAt>?").run(id, Date.now());
-      scheduler.lastSync = 0; return send(res, 200, { ok: true });
+      scheduler.lastSync = 0;
+      if (notice) accounts.push.notify(store, ruleNotice(notice, rule, scheduler.live)).catch(() => {});
+      return send(res, 200, { ok: true });
     }
     return send(res, 404, { error: 'Not found' });
   } catch (e) { send(res, 400, { error: String(e.message).slice(0, 250) }); }

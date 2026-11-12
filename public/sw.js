@@ -9,7 +9,7 @@ self.addEventListener('activate', event => {
 self.addEventListener('push', event => {
   let data = {};
   try { data = event.data.json(); } catch { /* show a generic notice below */ }
-  event.waitUntil(self.registration.showNotification(data.title || 'Arlo Auto', { body: data.body || 'Open the app for details.', tag: data.tag, icon: '/icon-192.png', data: { url: data.url || '/' } }));
+  event.waitUntil(self.registration.showNotification(data.title || 'Arlo Auto', { body: data.body || 'Open the app for details.', tag: data.tag, renotify: !!data.tag, icon: '/icon-192.png', data: { url: data.url || '/' } }));
 });
 self.addEventListener('notificationclick', event => {
   event.notification.close();

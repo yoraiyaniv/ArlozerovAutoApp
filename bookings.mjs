@@ -13,7 +13,7 @@ export async function singleBooking(client, key, date, waitlist = false) {
   try { await client.register(current, current.status === 1 && waitlist); } catch (e) { writeError = e; }
   // Reconcile even when the network response is lost. Never repeat a mutation automatically.
   const after = await confirmation(client, key, date);
-  if (booked(after)) return { status: [4, 10].includes(after.status) ? 'waitlisted' : 'registered' };
+  if (booked(after)) return { status: [4, 10].includes(after.status) ? 'waitlisted' : 'registered', name: after.name, startsAt: after.startsAt };
   throw writeError || new Error('Registration is not confirmed. Refresh Upcoming classes before trying again.');
 }
 export async function cancelBooking(client, key, date) {
@@ -22,6 +22,6 @@ export async function cancelBooking(client, key, date) {
   let writeError;
   try { await client.cancel(current); } catch (e) { writeError = e; }
   const after = await confirmation(client, key, date);
-  if (!booked(after)) return { status: 'cancelled' };
+  if (!booked(after)) return { status: 'cancelled', name: current.name, startsAt: current.startsAt };
   throw writeError || new Error('Cancellation is not confirmed. The class is still booked.');
 }

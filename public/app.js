@@ -16,7 +16,6 @@ function clearAccountData() {
   state = { rules: [], jobs: [], connected: false }; calendarLoading = false; calendarError = ''; loadedWeek = null;
   $('#classes').replaceChildren(el('div', 'empty', 'Sign in to see your classes.'));
   $('#bookings-list').replaceChildren(); $('#rules-list').replaceChildren(); $('#jobs-list').replaceChildren();
-  $('#class-count').textContent = '—'; $('#active-count').textContent = '0'; $('#rule-count').textContent = '0';
   $('#member-label').textContent = 'Sign in with Fizikal'; $('#account-label').textContent = 'Your private account';
   $('#mode-banner').textContent = 'Sign in with your own Fizikal account to manage your classes.';
   $('#error').hidden = true;
@@ -43,14 +42,14 @@ async function refreshState() {
   if (changed) renderState();
 }
 function renderState() {
-  $('#rule-count').textContent = state.rules.length;
-  $('#active-count').textContent = state.rules.filter(r => r.enabled && !r.once).length;
   $('#member-label').textContent = state.connected ? (state.member || 'Club account connected') : 'Connect your account';
   $('#account-label').textContent = state.connected ? 'Manage connection' : 'Fizikal membership';
   $('#disconnect').hidden = !state.connected;
+  $('#connect-fields').hidden = state.connected;
   $('#mode-banner').classList.toggle('live', state.live && state.connected);
   $('#mode-banner').textContent = !state.live ? (state.connected ? 'Fizikal connected · One-time registration is available. Automatic weekly booking is paused.' : 'Connect your Fizikal account to register. Automatic weekly booking is paused.') : state.connected ? 'Fizikal connected · Weekly booking is enabled.' : 'Connect your Fizikal account to activate registration.';
   if (state.syncError) $('#mode-banner').textContent += ' Schedule sync needs attention: ' + state.syncError;
+  $('#mode-banner').hidden = state.live && state.connected && !state.syncError;
   renderRules(); renderJobs(); renderClasses();
 }
 async function loadCalendar(force = false, attempt = 0) {
@@ -69,8 +68,6 @@ async function loadCalendar(force = false, attempt = 0) {
     loadedDays.set(start, data);
     classes = [...classes.filter(a => a.date !== start), ...data.classes];
     loadedWeek = start; calendarLoading = false;
-    $('#class-count').textContent = classes.filter(a => a.date >= week && a.date <= shift(week, 6)).length;
-    $('#sync-label').textContent = (data.stale ? 'Saved schedule · updated ' : 'Live schedule · updated ') + fmt(data.fetchedAt, { hour: '2-digit', minute: '2-digit' });
     // An old saved copy is refreshing on the server; pick up the result quietly before warning.
     if (data.stale && !data.failed && attempt < 3) setTimeout(() => { if (selectedDate === start && generation === accountGeneration) loadCalendar(false, attempt + 1); }, 6000);
     else if (data.stale) error('Fizikal is responding slowly. Showing the last saved schedule; availability will be checked when you register.');
@@ -93,13 +90,11 @@ function renderDays() {
     button.onclick = () => { selectedDate = date; loadCalendar(); };
     $('#days').append(button);
   });
-  $('#day-label').textContent = fmt(new Date(selectedDate + 'T12:00:00Z'), { weekday: 'long', day: 'numeric', month: 'long' });
 }
 const statuses = { 0: 'Full', 1: 'Waitlist available', 2: 'Registered', 3: 'Open for booking', 4: 'On waitlist', 5: 'Few places left', 6: 'Not open yet', 7: 'Booking closed', 8: 'Registered', 9: 'Reminder set', 10: 'Waitlist place ready' };
 function renderClasses() {
   const q = $('#search').value.toLocaleLowerCase().trim(), type = $('#type-filter').value;
   const filtered = classes.filter(a => a.date === selectedDate && (!type || a.name === type) && (!q || (a.name + ' ' + a.instructor).toLocaleLowerCase().includes(q))).sort((a, b) => a.startsAt - b.startsAt);
-  $('#result-count').textContent = `${filtered.length} classes`;
   const list = $('#classes'); list.replaceChildren();
   if (!filtered.length) return list.append(el('div', 'empty', calendarLoading ? 'Loading this day’s classes from Fizikal…' : calendarError || (loadedDays.has(selectedDate) ? 'No classes match this day and filter.' : 'Choose Refresh to load this day’s schedule.')));
   for (const a of filtered) {
@@ -194,12 +189,11 @@ function renderJobs() {
 }
 function setView(name) {
   view = name;
-  const titles = { upcoming: ['Your upcoming classes', 'Confirmed registrations and waitlist places, straight from Fizikal.'], schedule: ['Your week starts here', 'Find your rhythm. Turn the classes you love into a weekly routine.'], rules: ['Your recurring classes', 'Manage, pause, or remove your weekly registrations.'], activity: ['Every booking, in view', 'See upcoming targets, registration attempts, and confirmed results.'] };
+  const titles = { upcoming: 'Upcoming', schedule: 'Schedule', rules: 'Recurring', activity: 'Activity' };
   for (const key of Object.keys(titles)) $('#' + key + '-view').hidden = key !== name;
   document.querySelectorAll('.nav').forEach(n => n.classList.toggle('active', n.dataset.view === name));
-  $('#breadcrumb').textContent = { upcoming: 'UPCOMING CLASSES', schedule: 'CLASS SCHEDULE', rules: 'RECURRING CLASSES', activity: 'BOOKING ACTIVITY' }[name];
-  $('#page-title').replaceChildren(document.createTextNode(titles[name][0]), el('span', '', '.'));
-  $('#page-description').textContent = titles[name][1]; $('#refresh').hidden = name !== 'schedule';
+  $('#page-title').replaceChildren(document.createTextNode(titles[name]), el('span', '', '.'));
+  $('#refresh').hidden = name !== 'schedule';
   if (name === 'upcoming') return loadBookings();
 }
 async function loadBookings() {
@@ -303,7 +297,7 @@ $('#auth-form').onsubmit = async event => {
 };
 $('#auth-dialog').addEventListener('cancel', event => event.preventDefault());
 async function initialize() { try { await refreshState(); await loadCalendar(); syncPush(); } catch (e) { if (!$('#auth-dialog').open) error(e.message); } }
-const showHash = () => { if (location.hash === '#activity') setView('activity'); };
+const showHash = () => { const view = { '#activity': 'activity', '#rules': 'rules' }[location.hash]; if (view) setView(view); };
 window.addEventListener('hashchange', showHash);
 renderDays(); initialize(); showHash();
 setInterval(() => { if (!document.hidden && !$('#auth-dialog').open) refreshState().catch(() => {}); }, 15000);

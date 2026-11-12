@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { Accounts } from '../accounts.mjs';
 import { createApplication } from '../server.mjs';
 import { createPush, outcomeNotice, validSubscription } from '../push.mjs';
+import { normalize } from '../time.mjs';
 const keys = { p256dh: 'BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM', auth: 'tBHItJI5svbpez7KI4CCXg' };
 const sub = (path = 'abc123') => ({ endpoint: 'https://fcm.googleapis.com/fcm/send/' + path, keys });
 const setup = (t, prefix) => {
@@ -81,4 +82,54 @@ test('subscription endpoints require sign-in, validate input, and keep one phone
   await req('push/subscribe', b.cookie, 'POST', { subscription: sub('again') });
   await req('account', b.cookie, 'DELETE');
   assert.equal([...accounts.contexts.values()].reduce((n, c) => n + c.store.pushSubs().length, 0), 0, 'disconnecting removes every saved phone');
+});
+test('registering and cancelling by hand each send a notification, repeats do not', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'arlo-push-manual-'));
+  let status = 3;
+  const clientFactory = () => ({ session: null, dayCache: new Map(),
+    async login() { this.session = { userId: 1, token: 't', name: 'M' }; },
+    async calendar() { return [normalize({ LessonID: 7, ID: 0, Name: 'Yoga', StartDateTimeJson: '2050-10-28T19:00:00+02:00', StartHour: '190000', DurationInMinutes: 45, Status: status })]; },
+    async upcoming() { return (await this.calendar()).filter(a => [2, 4].includes(a.status)); },
+    async register() { status = 2; }, async cancel() { status = 3; } });
+  const accounts = new Accounts(dir, undefined, { clientFactory, workers: false }), server = createApplication(accounts), sent = [];
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { await new Promise(resolve => server.close(resolve)); accounts.close(); rmSync(dir, { recursive: true }); });
+  accounts.push = createPush(accounts.root, { send: async (s, body) => { sent.push(JSON.parse(body)); } });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const req = async (path, cookie, data) => { const res = await fetch(origin + '/api/' + path, { method: data ? 'POST' : 'GET', headers: { Origin: origin, Cookie: cookie, ...(data ? { 'Content-Type': 'application/json' } : {}) }, body: data ? JSON.stringify(data) : undefined }); return res.json(); };
+  const login = await fetch(origin + '/api/auth', { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: '0500000001', password: 'x' }) });
+  const cookie = login.headers.get('set-cookie').split(';')[0];
+  [...accounts.contexts.values()][0].store.addPush(sub());
+  const cls = (await req('calendar?start=2050-10-28&days=1', cookie)).classes[0], pause = () => new Promise(resolve => setTimeout(resolve, 30));
+  await req('bookings/register', cookie, { key: cls.key, date: cls.date }); await pause();
+  assert.equal(sent.length, 1); assert.equal(sent[0].title, 'Registered: Yoga'); assert.match(sent[0].body, /Fri 28 Oct, 20:00.*confirmed/);
+  await req('bookings/register', cookie, { key: cls.key, date: cls.date }); await pause();
+  assert.equal(sent.length, 1, 'registering again changes nothing, so no notification');
+  await req('bookings/cancel', cookie, { key: cls.key, date: cls.date }); await pause();
+  assert.equal(sent.length, 2); assert.equal(sent[1].title, 'Cancelled: Yoga'); assert.match(sent[1].body, /Cancellation confirmed/);
+  await req('bookings/cancel', cookie, { key: cls.key, date: cls.date }); await pause();
+  assert.equal(sent.length, 2, 'cancelling again changes nothing, so no notification');
+});
+test('saving, pausing, resuming and removing a routine each send a notification', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'arlo-push-rules-'));
+  const clientFactory = () => ({ session: null, dayCache: new Map(), async login() { this.session = { userId: 1, token: 't', name: 'M' }; },
+    async calendar() { return [normalize({ LessonID: 7, ID: 0, Name: 'Yoga', StartDateTimeJson: '2050-10-28T19:00:00+02:00', StartHour: '190000', DurationInMinutes: 45, Status: 3 })]; } });
+  const accounts = new Accounts(dir, undefined, { clientFactory, workers: false }), server = createApplication(accounts), sent = [];
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { await new Promise(resolve => server.close(resolve)); accounts.close(); rmSync(dir, { recursive: true }); });
+  accounts.push = createPush(accounts.root, { send: async (s, body) => { sent.push(JSON.parse(body)); } });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const req = async (path, cookie, method = 'GET', data) => { const res = await fetch(origin + '/api/' + path, { method, headers: { Origin: origin, Cookie: cookie, ...(data ? { 'Content-Type': 'application/json' } : {}) }, body: data ? JSON.stringify(data) : undefined }); return res.json(); };
+  const login = await fetch(origin + '/api/auth', { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: '0500000001', password: 'x' }) });
+  const cookie = login.headers.get('set-cookie').split(';')[0], pause = () => new Promise(resolve => setTimeout(resolve, 30));
+  [...accounts.contexts.values()][0].store.addPush(sub());
+  const cls = (await req('calendar?start=2050-10-28&days=1', cookie)).classes[0];
+  const { rule } = await req('rules', cookie, 'POST', { key: cls.key, start: cls.date }); await pause();
+  assert.equal(sent.at(-1).title, 'Weekly routine saved: Yoga'); assert.match(sent.at(-1).body, /paused/, 'preview mode says nothing will be booked');
+  await req('rules/' + rule.id, cookie, 'PATCH', { enabled: false }); await pause(); assert.equal(sent.at(-1).title, 'Routine paused: Yoga');
+  await req('rules/' + rule.id, cookie, 'PATCH', { waitlist: true }); await pause(); assert.equal(sent.length, 2, 'changing only the waitlist option is not announced');
+  await req('rules/' + rule.id, cookie, 'PATCH', { enabled: true }); await pause(); assert.equal(sent.at(-1).title, 'Routine resumed: Yoga');
+  await req('rules/' + rule.id, cookie, 'DELETE'); await pause(); assert.equal(sent.at(-1).title, 'Routine removed: Yoga'); assert.equal(sent.length, 4);
+  const once = await req('rules', cookie, 'POST', { key: cls.key, start: cls.date, once: true }); await pause();
+  assert.equal(sent.at(-1).title, 'Scheduled: Yoga'); assert.equal(once.rule.once, cls.key);
 });

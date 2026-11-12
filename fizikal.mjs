@@ -2,7 +2,7 @@ import { normalize, shiftDate } from './time.mjs';
 const COBR = 'JpcTNAEJt1VDUX3aoF9kYxpak8GAd7fp4B3bcf6BRFE=';
 const ROOT = 'https://m.fizikal.co.il';
 export class Fizikal {
-  constructor() { this.session = null; this.config = null; this.dayCache = new Map(); this.dayLoads = new Map(); }
+  constructor() { this.session = null; this.config = null; this.dayCache = new Map(); this.dayLoads = new Map(); this.retryDelay = 400; }
   async setup() {
     if (this.config) return;
     const res = await fetch(`${ROOT}/website/NavJsHandler.aspx?cobr=${encodeURIComponent(COBR)}`, { signal: AbortSignal.timeout(20000) });
@@ -21,7 +21,18 @@ export class Fizikal {
     await this.setup();
     const url = new URL(this.config.server + path);
     for (const [k, v] of Object.entries(params)) if (v !== null && v !== undefined) url.searchParams.set(k, String(v));
-    const res = await fetch(url, { method, headers: { ...this.config.headers, ...(session?.token ? { TOKEN: session.token } : {}) }, body: method === 'GET' ? undefined : JSON.stringify(body || {}), signal: AbortSignal.timeout(method === 'GET' ? 45000 : 20000) });
+    // Reads are safe to repeat, so retry dropped connections and club 5xx errors. Writes are never replayed blindly.
+    const tries = method === 'GET' ? 3 : 1;
+    let res;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        res = await fetch(url, { method, headers: { ...this.config.headers, ...(session?.token ? { TOKEN: session.token } : {}) }, body: method === 'GET' ? undefined : JSON.stringify(body || {}), signal: AbortSignal.timeout(method === 'GET' ? 45000 : 20000) });
+        if (!(res.status >= 500) || attempt >= tries) break;
+      } catch (e) {
+        if (attempt >= tries || e.name === 'TimeoutError' || e.name === 'AbortError') throw e;
+      }
+      await new Promise(resolve => setTimeout(resolve, this.retryDelay * attempt));
+    }
     if (!res.ok) throw new Error(`Club service returned HTTP ${res.status}`);
     const data = await res.json();
     if (data.ResultCode !== 1) {
@@ -42,22 +53,23 @@ export class Fizikal {
     this.session = { token: info.Token, userId: branches[0].LoggedUser.ID, name: branches[0].LoggedUser.FirstName || 'Member' };
     return { name: this.session.name };
   }
-  async calendar(start, end, guest = false) {
+  async calendar(start, end, guest = false, fresh = false) {
     const dates = [];
     for (let date = start; date <= end; date = shiftDate(date, 1)) { dates.push(date); if (dates.length > 90) throw new Error('Schedule range too large'); }
     let cursor = 0;
     const result = new Array(dates.length);
     await Promise.all(Array.from({ length: Math.min(3, dates.length) }, async () => {
-      while (cursor < dates.length) { const i = cursor++; result[i] = await this.calendarDay(dates[i], guest); }
+      while (cursor < dates.length) { const i = cursor++; result[i] = await this.calendarDay(dates[i], guest, fresh); }
     }));
     return result.flat();
   }
-  async calendarDay(start, guest = false) {
+  async calendarDay(start, guest = false, fresh = false) {
     const cacheKey = `${guest ? 'guest' : this.session?.userId || 'guest'}:${start}`;
     const cached = this.dayCache.get(cacheKey);
-    if (cached && Date.now() - cached.at < 15000) return cached.classes;
-    if (this.dayLoads.has(cacheKey)) return this.dayLoads.get(cacheKey);
-    const task = this.fetchCalendarDay(start, guest).then(classes => { this.dayCache.set(cacheKey, { at: Date.now(), classes }); return classes; }).finally(() => this.dayLoads.delete(cacheKey));
+    // A booking attempt must see the club's status right now, never a copy up to 15 seconds old or one already in flight.
+    if (!fresh && cached && Date.now() - cached.at < 15000) return cached.classes;
+    if (!fresh && this.dayLoads.has(cacheKey)) return this.dayLoads.get(cacheKey);
+    const task = this.fetchCalendarDay(start, guest).then(classes => { this.dayCache.set(cacheKey, { at: Date.now(), classes }); return classes; }).finally(() => { if (this.dayLoads.get(cacheKey) === task) this.dayLoads.delete(cacheKey); });
     this.dayLoads.set(cacheKey, task);
     return task;
   }

@@ -21,7 +21,7 @@ export class Accounts {
     const store = openStore(resolve(this.dir, 'accounts', account.id), this.key);
     const client = this.clientFactory();
     const scheduler = new Scheduler(store, client, { live: this.live, now: this.now });
-    scheduler.onFinal = (job, status, message) => this.push.notify(store, outcomeNotice(job, status, message, scheduler.live)).catch(() => {});
+    scheduler.onEvent = (job, status, message) => this.push.notify(store, outcomeNotice(job, status, message, scheduler.live)).catch(() => {});
     const connectSaved = scheduler.connect.bind(scheduler);
     const bookingLocks = new Set(), calendarLoads = new Map();
     scheduler.blockedKeys = bookingLocks;
