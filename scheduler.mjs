@@ -49,6 +49,11 @@ export class Scheduler {
   }
   finish(key, status, message) {
     this.store.db.prepare('UPDATE jobs SET status=?,message=?,updatedAt=? WHERE key=?').run(status, message, this.now(), key);
+    // A one-time rule has done its job once its single occurrence reaches a final state.
+    if (FINAL.has(status)) {
+      const ruleId = this.store.db.prepare('SELECT ruleId FROM jobs WHERE key=?').get(key)?.ruleId;
+      if (this.store.rules().some(r => r.id === ruleId && r.once)) this.store.db.prepare('DELETE FROM rules WHERE id=?').run(ruleId);
+    }
   }
   async attempt(job) {
     if (this.blockedKeys?.has(job.key)) return;

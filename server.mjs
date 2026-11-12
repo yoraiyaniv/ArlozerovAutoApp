@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID, createHash } from 'node:crypto';
 import { Accounts, sessionCookie } from './accounts.mjs';
 import { Fizikal } from './fizikal.mjs';
-import { israelDate, shiftDate } from './time.mjs';
+import { israelDate, shiftDate, matches } from './time.mjs';
 import { singleBooking, cancelBooking } from './bookings.mjs';
 const root = dirname(fileURLToPath(import.meta.url));
 function send(res, code, data) { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); }
@@ -132,13 +132,14 @@ return http.createServer(async (req, res) => {
       return send(res, 200, { ok: true });
     }
     if (url.pathname === '/api/rules' && req.method === 'POST') {
-      const { key, start, waitlist = false, pinInstructor = false } = await body(req);
-      if (typeof start !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(start) || typeof key !== 'string' || typeof waitlist !== 'boolean' || typeof pinInstructor !== 'boolean') return send(res, 400, { error: 'Choose a class from the schedule' });
+      const { key, start, waitlist = false, pinInstructor = false, once = false } = await body(req);
+      if (typeof start !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(start) || typeof key !== 'string' || typeof waitlist !== 'boolean' || typeof pinInstructor !== 'boolean' || typeof once !== 'boolean') return send(res, 400, { error: 'Choose a class from the schedule' });
       const a = (await client.calendar(start, shiftDate(start, 6))).find(a => a.key === key);
       if (!a) return send(res, 409, { error: 'Class changed. Refresh the schedule.' });
       if (a.paid || a.seatsMap || a.raw.RequireReserve || a.raw.HasCourt) return send(res, 400, { error: 'This class requires manual booking on Fizikal' });
-      if (store.rules().some(r => r.lessonId === a.lessonId && r.weekday === a.weekday && r.time === a.time)) return send(res, 409, { error: 'A weekly rule already exists for this class' });
-      const rule = { id: randomUUID(), lessonId: a.lessonId, name: a.name, weekday: a.weekday, time: a.time, instructor: a.instructor, instructorId: a.instructorId, waitlist, pinInstructor, enabled: true, createdAt: Date.now() };
+      if (once && a.dueAt <= Date.now()) return send(res, 400, { error: 'This class is already open. Register for it directly.' });
+      if (store.rules().some(r => once ? r.once === a.key || (!r.once && matches(r, a)) : !r.once && r.lessonId === a.lessonId && r.weekday === a.weekday && r.time === a.time)) return send(res, 409, { error: once ? 'This class is already scheduled' : 'A weekly rule already exists for this class' });
+      const rule = { id: randomUUID(), lessonId: a.lessonId, name: a.name, weekday: a.weekday, time: a.time, instructor: a.instructor, instructorId: a.instructorId, waitlist, pinInstructor, enabled: true, createdAt: Date.now(), ...(once ? { once: a.key, startsAt: a.startsAt } : {}) };
       store.db.prepare('INSERT INTO rules VALUES (?,?)').run(rule.id, JSON.stringify(rule));
       scheduler.lastSync = 0;
       return send(res, 201, { rule });

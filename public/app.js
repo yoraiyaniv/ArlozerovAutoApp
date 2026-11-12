@@ -44,7 +44,7 @@ async function refreshState() {
 }
 function renderState() {
   $('#rule-count').textContent = state.rules.length;
-  $('#active-count').textContent = state.rules.filter(r => r.enabled).length;
+  $('#active-count').textContent = state.rules.filter(r => r.enabled && !r.once).length;
   $('#member-label').textContent = state.connected ? (state.member || 'Club account connected') : 'Connect your account';
   $('#account-label').textContent = state.connected ? 'Manage connection' : 'Fizikal membership';
   $('#disconnect').hidden = !state.connected;
@@ -53,8 +53,8 @@ function renderState() {
   if (state.syncError) $('#mode-banner').textContent += ' Schedule sync needs attention: ' + state.syncError;
   renderRules(); renderJobs(); renderClasses();
 }
-async function loadCalendar(force = false) {
-  const request = ++calendarRequest, start = selectedDate;
+async function loadCalendar(force = false, attempt = 0) {
+  const request = ++calendarRequest, start = selectedDate, generation = accountGeneration;
   const savedDay = loadedDays.get(start);
   if (!force && savedDay && Date.now() - savedDay.fetchedAt < 30000) {
     calendarLoading = false; calendarError = ''; renderDays(); renderClasses(); return;
@@ -71,7 +71,9 @@ async function loadCalendar(force = false) {
     loadedWeek = start; calendarLoading = false;
     $('#class-count').textContent = classes.filter(a => a.date >= week && a.date <= shift(week, 6)).length;
     $('#sync-label').textContent = (data.stale ? 'Saved schedule · updated ' : 'Live schedule · updated ') + fmt(data.fetchedAt, { hour: '2-digit', minute: '2-digit' });
-    if (data.stale) error('Fizikal is responding slowly. Showing the last saved schedule; availability will be checked when you register.');
+    // An old saved copy is refreshing on the server; pick up the result quietly before warning.
+    if (data.stale && !data.failed && attempt < 3) setTimeout(() => { if (selectedDate === start && generation === accountGeneration) loadCalendar(false, attempt + 1); }, 6000);
+    else if (data.stale) error('Fizikal is responding slowly. Showing the last saved schedule; availability will be checked when you register.');
     const value = $('#type-filter').value;
     $('#type-filter').replaceChildren(new Option('All classes', ''));
     [...new Set(classes.map(a => a.name))].sort((a, b) => a.localeCompare(b, 'he')).forEach(name => $('#type-filter').add(new Option(name, name)));
@@ -125,7 +127,10 @@ function renderClasses() {
 function track(event) { api('ab/event', { method: 'POST', body: JSON.stringify({ event }) }).catch(() => {}); }
 function openRule(a) {
   selectedClass = a; $('#rule-form').reset(); $('#rule-error').textContent = '';
-  if (state.abVariant === 'B') $('[name="booking-mode"][value="recurring"]').checked = true;
+  const notOpen = a.status === 6 && a.dueAt > Date.now();
+  $('#scheduled-option').hidden = !notOpen;
+  if (notOpen) $('[name="booking-mode"][value="scheduled"]').checked = true;
+  else if (state.abVariant === 'B') $('[name="booking-mode"][value="recurring"]').checked = true;
   track('dialog_opened');
   $('#waitlist').checked = a.status === 1;
   const title = el('strong', '', a.name); title.dir = 'auto';
@@ -137,28 +142,30 @@ function openRule(a) {
   updateBookingMode(); $('#rule-dialog').showModal();
 }
 function updateBookingMode() {
-  const recurring = $('[name="booking-mode"]:checked').value === 'recurring';
-  $('#recurring-options').hidden = !recurring;
-  $('#single-note').hidden = recurring;
+  const mode = $('[name="booking-mode"]:checked').value, single = mode === 'single', scheduled = mode === 'scheduled', recurring = mode === 'recurring';
+  $('#recurring-options').hidden = single;
+  $('#recurring-options strong').textContent = scheduled ? '↻    Once, 24 hours before' : '↻    Every week, 24 hours before';
+  $('#pin-instructor').parentElement.hidden = scheduled;
+  $('#single-note').hidden = !single;
   const waitlisting = selectedClass.status === 1;
-  $('#waitlist').disabled = !recurring && waitlisting;
-  if (!recurring && waitlisting) $('#waitlist').checked = true;
+  $('#waitlist').disabled = single && waitlisting;
+  if (single && waitlisting) $('#waitlist').checked = true;
   $('#single-note').textContent = waitlisting ? 'This class is full. This sends a request to join its waitlist on Fizikal.' : 'This sends a real registration request to Fizikal for this class only. ' + (statuses[selectedClass.status] || '');
-  const exists = state.rules.some(r => r.lessonId === selectedClass.lessonId && r.weekday === selectedClass.weekday && r.time === selectedClass.time);
-  $('#register-submit').textContent = recurring ? (exists ? 'Weekly routine already exists' : 'Enable weekly routine') : waitlisting ? 'Join waitlist' : 'Register for this class';
-  $('#register-submit').disabled = recurring ? exists : !state.connected || ![1, 3, 5].includes(selectedClass.status) || selectedClass.startsAt <= Date.now();
+  const exists = scheduled ? state.rules.some(r => r.once === selectedClass.key) : state.rules.some(r => !r.once && r.lessonId === selectedClass.lessonId && r.weekday === selectedClass.weekday && r.time === selectedClass.time);
+  $('#register-submit').textContent = scheduled ? (exists ? 'Already scheduled' : 'Register me when it opens') : recurring ? (exists ? 'Weekly routine already exists' : 'Enable weekly routine') : waitlisting ? 'Join waitlist' : 'Register for this class';
+  $('#register-submit').disabled = scheduled || recurring ? exists : !state.connected || ![1, 3, 5].includes(selectedClass.status) || selectedClass.startsAt <= Date.now();
 }
 document.querySelectorAll('[name="booking-mode"]').forEach(input => { input.onchange = updateBookingMode; });
 $('#rule-form').onsubmit = async event => {
   event.preventDefault(); const button = event.submitter; button.disabled = true; $('#rule-error').textContent = '';
   try {
-    const recurring = $('[name="booking-mode"]:checked').value === 'recurring';
-    const result = await api(recurring ? 'rules' : 'bookings/register', { method: 'POST', body: JSON.stringify({ key: selectedClass.key, date: selectedClass.date, start: week, waitlist: $('#waitlist').checked, pinInstructor: $('#pin-instructor').checked }) });
+    const mode = $('[name="booking-mode"]:checked').value, recurring = mode === 'recurring', scheduled = mode === 'scheduled';
+    const result = await api(recurring || scheduled ? 'rules' : 'bookings/register', { method: 'POST', body: JSON.stringify({ key: selectedClass.key, date: selectedClass.date, start: week, waitlist: $('#waitlist').checked, pinInstructor: !scheduled && $('#pin-instructor').checked, ...(scheduled ? { once: true } : {}) }) });
     $('#rule-dialog').close();
-    track(recurring ? 'rule_created' : 'single_booked');
-    toast(recurring ? (state.live ? 'Weekly routine saved' : 'Routine saved. Automatic weekly booking is paused.') : result.status === 'waitlisted' ? 'Waitlist confirmed by Fizikal' : 'Registration confirmed by Fizikal');
+    if (!scheduled) track(recurring ? 'rule_created' : 'single_booked');
+    toast(scheduled ? (state.live ? 'Scheduled. We’ll register you 24 hours before class.' : 'Saved, but automatic booking is paused, so nothing will be booked.') : recurring ? (state.live ? 'Weekly routine saved' : 'Routine saved. Automatic weekly booking is paused.') : result.status === 'waitlisted' ? 'Waitlist confirmed by Fizikal' : 'Registration confirmed by Fizikal');
     refreshState().catch(() => {});
-    if (!recurring) { await setView('upcoming'); }
+    if (scheduled) await setView('rules'); else if (!recurring) { await setView('upcoming'); }
   } catch (e) { $('#rule-error').textContent = e.message; }
   finally { button.disabled = false; }
 };
@@ -167,7 +174,7 @@ function renderRules() {
   if (!state.rules.length) return list.append(el('div', 'empty', 'No recurring classes yet. Choose Register, then Repeat weekly, on a class.'));
   for (const r of state.rules) {
     const card = el('article', 'rule-card'), info = el('div'), title = el('h3', '', r.name); title.dir = 'auto';
-    info.append(title, el('p', '', `Every ${days[r.weekday]} at ${r.time} · ${r.enabled ? 'Active' : 'Paused'}`), el('p', '', `Books 24 hours before · ${r.waitlist ? 'Waitlist enabled' : 'No waitlist'} · ${r.pinInstructor ? 'Instructor pinned' : 'Any scheduled instructor'}`));
+    info.append(title, el('p', '', (r.once ? `One time · ${fmt(r.startsAt, { weekday: 'long', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : `Every ${days[r.weekday]} at ${r.time}`) + ` · ${r.enabled ? 'Active' : 'Paused'}`), el('p', '', `Books 24 hours before · ${r.waitlist ? 'Waitlist enabled' : 'No waitlist'} · ${r.pinInstructor ? 'Instructor pinned' : 'Any scheduled instructor'}`));
     const next = state.jobs.filter(j => j.ruleId === r.id && ['pending', 'retry', 'running'].includes(j.status)).sort((a,b) => a.dueAt-b.dueAt)[0];
     info.append(el('p', '', next ? 'Next attempt: ' + fmt(next.dueAt, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Next opening will appear after schedule sync.'));
     const actions = el('div', 'card-actions'), toggle = el('button', '', r.enabled ? 'Ⅱ  Pause' : '▶  Resume'), remove = el('button', '', 'Remove');

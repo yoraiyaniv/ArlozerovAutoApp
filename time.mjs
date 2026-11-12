@@ -29,5 +29,5 @@ export function normalize(a) {
 }
 export function matches(rule, a) {
   return rule.lessonId === a.lessonId && rule.weekday === a.weekday && rule.time === a.time &&
-    (!rule.pinInstructor || rule.instructorId === a.instructorId);
+    (!rule.once || rule.once === a.key) && (!rule.pinInstructor || rule.instructorId === a.instructorId);
 }
