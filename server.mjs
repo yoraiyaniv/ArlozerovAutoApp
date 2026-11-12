@@ -183,7 +183,8 @@ return http.createServer(async (req, res) => {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const host = process.env.HOST || '127.0.0.1', port = Number(process.env.PORT || 3000);
   const secure = process.env.COOKIE_SECURE === 'true';
-  if (host !== '127.0.0.1' && (!process.env.ENCRYPTION_KEY || !secure)) throw new Error('Cloud mode requires ENCRYPTION_KEY and COOKIE_SECURE=true');
+  if (host !== '127.0.0.1' && !process.env.ENCRYPTION_KEY) throw new Error('Cloud mode requires ENCRYPTION_KEY, but it is missing or empty in this service\'s variables');
+  if (host !== '127.0.0.1' && !secure) throw new Error(`Cloud mode requires COOKIE_SECURE to be exactly "true" (it is "${process.env.COOKIE_SECURE}")`);
   const accounts = new Accounts(resolve(process.env.DATA_DIR || './data'), process.env.ENCRYPTION_KEY, { live: process.env.BOOKING_ENABLED === 'true' });
   accounts.start();
   const server = createApplication(accounts, { secure });
