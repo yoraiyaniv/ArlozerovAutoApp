@@ -2,7 +2,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { Accounts, sessionCookie } from './accounts.mjs';
 import { Fizikal } from './fizikal.mjs';
 import { israelDate, shiftDate } from './time.mjs';
@@ -15,6 +15,8 @@ async function body(req) {
   return JSON.parse(value || '{}');
 }
 function publicClass(a) { const { raw, ...rest } = a; return rest; }
+const abVariant = accountId => createHash('sha256').update(accountId).digest()[0] < 128 ? 'A' : 'B';
+const AB_EVENTS = ['dialog_opened', 'rule_created', 'single_booked'];
 const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'], '/install.js': ['install.js', 'text/javascript'], '/sw.js': ['sw.js', 'text/javascript'], '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'], '/offline.html': ['offline.html', 'text/html'], ...Object.fromEntries(['icon-192.png','icon-512.png','icon-maskable.png','apple-touch-icon.png'].map(name => ['/' + name, [name, 'image/png']])) };
 export function createApplication(accounts, { secure = false } = {}) {
 const failures = new Map();
@@ -87,11 +89,23 @@ return http.createServer(async (req, res) => {
     }
     if (url.pathname === '/api/state' && req.method === 'GET') {
       return send(res, 200, {
-        connected: !!store.get('credentials'), member: context.account.name, accountId: context.account.id,
+        connected: !!store.get('credentials'), member: context.account.name, accountId: context.account.id, abVariant: abVariant(context.account.id),
         live: scheduler.live, lastSync: scheduler.lastSync || null, syncError: scheduler.syncError,
         timezone: 'Asia/Jerusalem', rules: store.rules(),
         jobs: store.db.prepare('SELECT key,ruleId,dueAt,startsAt,status,attempts,updatedAt,message,data FROM jobs ORDER BY dueAt DESC LIMIT 150').all().map(j => ({ ...j, data: publicClass(JSON.parse(j.data)) }))
       });
+    }
+    if (url.pathname === '/api/ab/event' && req.method === 'POST') {
+      const { event } = await body(req);
+      if (!AB_EVENTS.includes(event)) return send(res, 400, { error: 'Unknown event' });
+      store.logAbEvent(abVariant(context.account.id), event);
+      return send(res, 200, { ok: true });
+    }
+    if (url.pathname === '/api/ab/report' && req.method === 'GET') {
+      const report = { A: {}, B: {} };
+      for (const c of accounts.contexts.values()) for (const { variant, event, count } of c.store.abCounts()) report[variant][event] = (report[variant][event] || 0) + count;
+      for (const v of ['A', 'B']) { const r = report[v]; r.conversion = r.dialog_opened ? +(((r.rule_created || 0) / r.dialog_opened).toFixed(3)) : null; }
+      return send(res, 200, report);
     }
     if (url.pathname === '/api/calendar' && req.method === 'GET') {
       const start = url.searchParams.get('start') || israelDate();

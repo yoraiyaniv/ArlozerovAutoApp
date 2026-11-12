@@ -122,8 +122,11 @@ function renderClasses() {
     row.append(time, stripe, details, status, button); list.append(row);
   }
 }
+function track(event) { api('ab/event', { method: 'POST', body: JSON.stringify({ event }) }).catch(() => {}); }
 function openRule(a) {
   selectedClass = a; $('#rule-form').reset(); $('#rule-error').textContent = '';
+  if (state.abVariant === 'B') $('[name="booking-mode"][value="recurring"]').checked = true;
+  track('dialog_opened');
   $('#waitlist').checked = a.status === 1;
   const title = el('strong', '', a.name); title.dir = 'auto';
   $('#rule-summary').replaceChildren(title, el('div', '', fmt(a.startsAt, { weekday: 'long', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) + ` · ${a.duration} minutes`), el('div', '', a.instructor));
@@ -152,6 +155,7 @@ $('#rule-form').onsubmit = async event => {
     const recurring = $('[name="booking-mode"]:checked').value === 'recurring';
     const result = await api(recurring ? 'rules' : 'bookings/register', { method: 'POST', body: JSON.stringify({ key: selectedClass.key, date: selectedClass.date, start: week, waitlist: $('#waitlist').checked, pinInstructor: $('#pin-instructor').checked }) });
     $('#rule-dialog').close();
+    track(recurring ? 'rule_created' : 'single_booked');
     toast(recurring ? (state.live ? 'Weekly routine saved' : 'Routine saved. Automatic weekly booking is paused.') : result.status === 'waitlisted' ? 'Waitlist confirmed by Fizikal' : 'Registration confirmed by Fizikal');
     refreshState().catch(() => {});
     if (!recurring) { await setView('upcoming'); }
