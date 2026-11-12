@@ -248,6 +248,7 @@ async function renderPush() {
   try { pushOn = !!(await pushSubscription()); } catch { pushOn = false; }
   const blocked = Notification.permission === 'denied' && !pushOn;
   button.disabled = blocked; button.textContent = pushOn ? 'Turn off notifications' : 'Turn on notifications';
+  $('#notify-test').hidden = !pushOn;
   note.textContent = blocked ? 'Notifications are blocked for this site in your browser settings.' : pushOn ? 'This phone gets a notification for every booking result.' : 'Get a notification on this phone for every booking result, even when the app is closed.';
 }
 async function dropPush() {
@@ -272,6 +273,15 @@ $('#notify-toggle').onclick = async () => {
     }
   } catch (e) { $('#account-error').textContent = e.message; }
   finally { await renderPush(); }
+};
+$('#notify-test').onclick = async () => {
+  const button = $('#notify-test'); button.disabled = true; $('#account-error').textContent = '';
+  try {
+    const result = await api('push/test', { method: 'POST' });
+    if (result.failed.length) throw new Error(`This phone's push service rejected it${result.failed[0].status ? ` (${result.failed[0].status})` : ''}: ${result.failed[0].message}`);
+    toast('Test sent. It should arrive on this phone within seconds.');
+  } catch (e) { $('#account-error').textContent = e.message; }
+  finally { button.disabled = false; }
 };
 $('#account-button').onclick = () => { $('#account-form').reset(); $('#account-error').textContent = ''; $('#account-dialog').showModal(); renderPush(); };
 $('#account-form').onsubmit = async event => {

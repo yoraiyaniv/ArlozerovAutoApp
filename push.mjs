@@ -29,7 +29,7 @@ export function outcomeNotice(job, status, message, live) {
   const detail = status === 'missed' && !live ? 'Not booked: automatic booking is paused.' : message;
   return { title: `${TITLES[status]}: ${JSON.parse(job.data).name}`, body: `${when(job.startsAt)}. ${detail}`, tag: job.key, url: '/#activity' };
 }
-export function createPush(root, { subject = process.env.VAPID_SUBJECT || 'https://github.com/yoraiyaniv/ArlozerovAutoApp', send = (sub, body, options) => webpush.sendNotification(sub, body, options) } = {}) {
+export function createPush(root, { subject = process.env.VAPID_SUBJECT || 'https://github.com/yoraiyaniv/ArlozerovAutoApp', send = (sub, body, options) => webpush.sendNotification(sub, body, options), log = console.error } = {}) {
   let keys;
   const saved = root.get('vapid');
   if (saved) keys = root.decrypt(saved);
@@ -39,9 +39,15 @@ export function createPush(root, { subject = process.env.VAPID_SUBJECT || 'https
     publicKey: keys.publicKey,
     async notify(store, payload) {
       const body = JSON.stringify(payload);
-      await Promise.all(store.pushSubs().map(async sub => {
-        try { await send(sub, body, { vapidDetails, TTL: 3600, urgency: 'high', timeout: 10000 }); }
-        catch (e) { if ([404, 410].includes(e.statusCode)) store.removePush(sub.endpoint); }
+      return Promise.all(store.pushSubs().map(async sub => {
+        const host = new URL(sub.endpoint).host;
+        try { await send(sub, body, { vapidDetails, TTL: 3600, urgency: 'high', timeout: 10000 }); return { host, ok: true }; }
+        catch (e) {
+          if ([404, 410].includes(e.statusCode)) store.removePush(sub.endpoint);
+          const message = String(e.body || e.message).slice(0, 200);
+          log(`Push to ${host} failed (${e.statusCode ?? 'no response'}): ${message}`);
+          return { host, ok: false, status: e.statusCode, message };
+        }
       }));
     }
   };

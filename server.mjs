@@ -111,6 +111,11 @@ return http.createServer(async (req, res) => {
       store.addPush(subscription);
       return send(res, 200, { ok: true });
     }
+    if (url.pathname === '/api/push/test' && req.method === 'POST') {
+      if (!store.pushSubs().length) return send(res, 409, { error: 'This phone is not subscribed yet. Turn on notifications first.' });
+      const results = await accounts.push.notify(store, { title: 'Notifications are working', body: 'You will be told about every booking result.', tag: 'test', url: '/' });
+      return send(res, 200, { sent: results.filter(r => r.ok).length, failed: results.filter(r => !r.ok).map(({ status, message }) => ({ status, message })) });
+    }
     if (url.pathname === '/api/push/unsubscribe' && req.method === 'POST') {
       const { endpoint } = await body(req);
       if (typeof endpoint !== 'string') return send(res, 400, { error: 'Invalid subscription' });

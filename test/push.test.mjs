@@ -133,3 +133,20 @@ test('saving, pausing, resuming and removing a routine each send a notification'
   const once = await req('rules', cookie, 'POST', { key: cls.key, start: cls.date, once: true }); await pause();
   assert.equal(sent.at(-1).title, 'Scheduled: Yoga'); assert.equal(once.rule.once, cls.key);
 });
+test('the test notification reports what the push service said, and failures are logged', async t => {
+  const accounts = setup(t, 'arlo-push-test-'), server = createApplication(accounts), logged = [];
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const login = await fetch(origin + '/api/auth', { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: '0500000001', password: 'x' }) });
+  const cookie = login.headers.get('set-cookie').split(';')[0];
+  const test = () => fetch(origin + '/api/push/test', { method: 'POST', headers: { Origin: origin, Cookie: cookie } }).then(async res => ({ status: res.status, data: await res.json() }));
+  assert.equal((await test()).status, 409, 'nothing to test before subscribing');
+  [...accounts.contexts.values()][0].store.addPush(sub());
+  accounts.push = createPush(accounts.root, { send: async () => {}, log: m => logged.push(m) });
+  assert.deepEqual((await test()).data, { sent: 1, failed: [] });
+  accounts.push = createPush(accounts.root, { send: async () => { throw Object.assign(new Error('Received unexpected response code'), { statusCode: 403, body: 'BadJwtToken' }); }, log: m => logged.push(m) });
+  const rejected = (await test()).data;
+  assert.equal(rejected.sent, 0); assert.deepEqual(rejected.failed, [{ status: 403, message: 'BadJwtToken' }]);
+  assert.match(logged.at(-1), /fcm\.googleapis\.com failed \(403\): BadJwtToken/); assert.ok(!logged.at(-1).includes('abc123'), 'the private endpoint path is not logged');
+});
