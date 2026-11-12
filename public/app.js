@@ -18,7 +18,7 @@ function clearAccountData() {
   $('#bookings-list').replaceChildren(); $('#rules-list').replaceChildren(); $('#jobs-list').replaceChildren();
   $('#member-label').textContent = 'Sign in with Fizikal'; $('#account-label').textContent = 'Your private account';
   $('#mode-banner').textContent = 'Sign in with your own Fizikal account to manage your classes.';
-  $('#error').hidden = true;
+  $('#error').hidden = true; $('#notify-banner').hidden = true;
   for (const d of document.querySelectorAll('dialog[open]')) if (d.id !== 'auth-dialog') d.close();
 }
 function el(tag, className, text) { const n = document.createElement(tag); if (className) n.className = className; if (text !== undefined) n.textContent = text; return n; }
@@ -50,7 +50,7 @@ function renderState() {
   $('#mode-banner').textContent = !state.live ? (state.connected ? 'Fizikal connected · One-time registration is available. Automatic weekly booking is paused.' : 'Connect your Fizikal account to register. Automatic weekly booking is paused.') : state.connected ? 'Fizikal connected · Weekly booking is enabled.' : 'Connect your Fizikal account to activate registration.';
   if (state.syncError) $('#mode-banner').textContent += ' Schedule sync needs attention: ' + state.syncError;
   $('#mode-banner').hidden = state.live && state.connected && !state.syncError;
-  renderRules(); renderJobs(); renderClasses();
+  renderRules(); renderJobs(); renderClasses(); renderNotifyBanner();
 }
 async function loadCalendar(force = false, attempt = 0) {
   const request = ++calendarRequest, start = selectedDate, generation = accountGeneration;
@@ -259,20 +259,40 @@ async function syncPush() {
   if (!pushSupported || Notification.permission !== 'granted') return;
   try { const sub = await pushSubscription(); if (sub) await api('push/subscribe', { method: 'POST', body: JSON.stringify({ subscription: sub.toJSON() }) }); } catch { /* retried on next load */ }
 }
+async function subscribePush() {
+  if (await Notification.requestPermission() !== 'granted') throw new Error('Notifications were not allowed on this phone.');
+  const { publicKey } = await api('push/key');
+  const sub = await (await navigator.serviceWorker.ready).pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) });
+  try { await api('push/subscribe', { method: 'POST', body: JSON.stringify({ subscription: sub.toJSON() }) }); }
+  catch (e) { await sub.unsubscribe(); throw e; }
+  toast('Notifications are on for this phone');
+}
+// Tell a signed-in member who has not enabled notifications to do it. The permission prompt itself needs a tap.
+async function renderNotifyBanner() {
+  const banner = $('#notify-banner'), text = $('#notify-banner-text'), action = $('#notify-banner-action');
+  banner.hidden = true;
+  if (!state.accountId) return;
+  if (!pushSupported) {
+    if (!/iPhone|iPad/.test(navigator.userAgent)) return;
+    text.textContent = 'To get booking notifications, install this app: tap Share, then Add to Home Screen, and open it from there.'; action.hidden = true; banner.hidden = false; return;
+  }
+  let subscribed = false;
+  try { subscribed = !!(await pushSubscription()); } catch { /* treated as not subscribed */ }
+  if (subscribed) return;
+  const blocked = Notification.permission === 'denied';
+  text.textContent = blocked ? 'Notifications are blocked. Allow them for Arlo Auto in your phone settings to be told about your bookings.' : 'Turn on notifications to be told about every booking result.';
+  action.hidden = blocked; banner.hidden = false;
+}
+$('#notify-banner-action').onclick = async () => {
+  const button = $('#notify-banner-action'); button.disabled = true;
+  try { await subscribePush(); } catch (e) { error(e.message); }
+  finally { button.disabled = false; renderNotifyBanner(); renderPush(); }
+};
 $('#notify-toggle').onclick = async () => {
   const button = $('#notify-toggle'); button.disabled = true; $('#account-error').textContent = '';
-  try {
-    if (pushOn) await dropPush();
-    else {
-      if (await Notification.requestPermission() !== 'granted') throw new Error('Notifications were not allowed on this phone.');
-      const { publicKey } = await api('push/key');
-      const sub = await (await navigator.serviceWorker.ready).pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) });
-      try { await api('push/subscribe', { method: 'POST', body: JSON.stringify({ subscription: sub.toJSON() }) }); }
-      catch (e) { await sub.unsubscribe(); throw e; }
-      toast('Notifications are on for this phone');
-    }
-  } catch (e) { $('#account-error').textContent = e.message; }
-  finally { await renderPush(); }
+  try { if (pushOn) await dropPush(); else await subscribePush(); }
+  catch (e) { $('#account-error').textContent = e.message; }
+  finally { await renderPush(); renderNotifyBanner(); }
 };
 $('#notify-test').onclick = async () => {
   const button = $('#notify-test'); button.disabled = true; $('#account-error').textContent = '';

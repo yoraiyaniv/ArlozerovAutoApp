@@ -59,3 +59,4 @@ dialog h2{font-size:26px;margin:12px 0 18px}
 #toast{left:16px;right:16px;bottom:calc(92px + env(safe-area-inset-bottom));transform:none;text-align:center;font-size:14px}
 }
 .close{margin-left:auto}
+.notify-banner{display:flex;align-items:center;justify-content:space-between;gap:14px;background:#edf3e8;color:#2f5b45;border-color:#d6e3d3}.notify-banner .button{flex:none;padding:10px 16px}.notify-banner[hidden]{display:none}@media(max-width:760px){.notify-banner .button{min-height:44px;font-size:14px;border-radius:10px}}
