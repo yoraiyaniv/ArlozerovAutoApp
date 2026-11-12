@@ -243,7 +243,43 @@ $('#next-week').onclick = () => { week = shift(week, 7); selectedDate = week; lo
 $('#today').onclick = () => { week = shift(today, -new Date(today + 'T12:00:00Z').getUTCDay()); selectedDate = today; loadCalendar(); };
 $('#refresh').onclick = async () => { await loadCalendar(true); try { await refreshState(); } catch (e) { error(e.message); } };
 $('#search').oninput = renderClasses; $('#type-filter').onchange = renderClasses;
-$('#account-button').onclick = () => { $('#account-form').reset(); $('#account-error').textContent = ''; $('#account-dialog').showModal(); };
+const pushSupported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+let pushOn = false;
+const pushSubscription = async () => (await navigator.serviceWorker.ready).pushManager.getSubscription();
+function keyBytes(b64) { const raw = atob((b64 + '='.repeat((4 - b64.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(raw, c => c.charCodeAt(0)); }
+async function renderPush() {
+  const button = $('#notify-toggle'), note = $('#notify-note');
+  button.hidden = !pushSupported; note.hidden = false;
+  if (!pushSupported) { note.textContent = 'Booking notifications need a browser that supports web push. On iPhone, install the app first: Share, then Add to Home Screen, then open it from there.'; return; }
+  try { pushOn = !!(await pushSubscription()); } catch { pushOn = false; }
+  const blocked = Notification.permission === 'denied' && !pushOn;
+  button.disabled = blocked; button.textContent = pushOn ? 'Turn off notifications' : 'Turn on notifications';
+  note.textContent = blocked ? 'Notifications are blocked for this site in your browser settings.' : pushOn ? 'This phone gets a notification for every booking result.' : 'Get a notification on this phone for every booking result, even when the app is closed.';
+}
+async function dropPush() {
+  if (!pushSupported) return;
+  try { const sub = await pushSubscription(); if (sub) { await api('push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint: sub.endpoint }) }); await sub.unsubscribe(); } } catch { /* best effort */ }
+}
+async function syncPush() {
+  if (!pushSupported || Notification.permission !== 'granted') return;
+  try { const sub = await pushSubscription(); if (sub) await api('push/subscribe', { method: 'POST', body: JSON.stringify({ subscription: sub.toJSON() }) }); } catch { /* retried on next load */ }
+}
+$('#notify-toggle').onclick = async () => {
+  const button = $('#notify-toggle'); button.disabled = true; $('#account-error').textContent = '';
+  try {
+    if (pushOn) await dropPush();
+    else {
+      if (await Notification.requestPermission() !== 'granted') throw new Error('Notifications were not allowed on this phone.');
+      const { publicKey } = await api('push/key');
+      const sub = await (await navigator.serviceWorker.ready).pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) });
+      try { await api('push/subscribe', { method: 'POST', body: JSON.stringify({ subscription: sub.toJSON() }) }); }
+      catch (e) { await sub.unsubscribe(); throw e; }
+      toast('Notifications are on for this phone');
+    }
+  } catch (e) { $('#account-error').textContent = e.message; }
+  finally { await renderPush(); }
+};
+$('#account-button').onclick = () => { $('#account-form').reset(); $('#account-error').textContent = ''; $('#account-dialog').showModal(); renderPush(); };
 $('#account-form').onsubmit = async event => {
   event.preventDefault(); const button = event.submitter; button.disabled = true;
   try {
@@ -254,10 +290,10 @@ $('#account-form').onsubmit = async event => {
   finally { button.disabled = false; }
 };
 $('#disconnect').onclick = async () => {
-  try { await api('account', { method: 'DELETE' }); clearAccountData(); $('#auth-dialog').showModal(); toast('Account disconnected on all phones and routines paused'); } catch (e) { $('#account-error').textContent = e.message; }
+  try { await dropPush(); await api('account', { method: 'DELETE' }); clearAccountData(); $('#auth-dialog').showModal(); toast('Account disconnected on all phones and routines paused'); } catch (e) { $('#account-error').textContent = e.message; }
 };
 $('#signout').onclick = async () => {
-  try { await api('logout', { method: 'POST' }); clearAccountData(); $('#auth-form').reset(); $('#auth-error').textContent = ''; $('#auth-dialog').showModal(); toast('Signed out on this phone. Your weekly routines continue.'); }
+  try { await dropPush(); await api('logout', { method: 'POST' }); clearAccountData(); $('#auth-form').reset(); $('#auth-error').textContent = ''; $('#auth-dialog').showModal(); toast('Signed out on this phone. Your weekly routines continue.'); }
   catch (e) { $('#account-error').textContent = e.message; }
 };
 $('#auth-form').onsubmit = async event => {
@@ -266,6 +302,8 @@ $('#auth-form').onsubmit = async event => {
   catch (e) { $('#auth-error').textContent = e.message; } finally { button.disabled = false; }
 };
 $('#auth-dialog').addEventListener('cancel', event => event.preventDefault());
-async function initialize() { try { await refreshState(); await loadCalendar(); } catch (e) { if (!$('#auth-dialog').open) error(e.message); } }
-renderDays(); initialize();
+async function initialize() { try { await refreshState(); await loadCalendar(); syncPush(); } catch (e) { if (!$('#auth-dialog').open) error(e.message); } }
+const showHash = () => { if (location.hash === '#activity') setView('activity'); };
+window.addEventListener('hashchange', showHash);
+renderDays(); initialize(); showHash();
 setInterval(() => { if (!document.hidden && !$('#auth-dialog').open) refreshState().catch(() => {}); }, 15000);

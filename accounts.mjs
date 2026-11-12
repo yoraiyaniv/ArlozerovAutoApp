@@ -4,13 +4,14 @@ import { openStore } from './store.mjs';
 import { Fizikal } from './fizikal.mjs';
 import { Scheduler } from './scheduler.mjs';
 import { israelDate, shiftDate } from './time.mjs';
+import { createPush, outcomeNotice } from './push.mjs';
 const YEAR = 365 * 86400000;
 const digest = token => createHash('sha256').update(token).digest('hex');
 const publicClass = ({ raw, ...a }) => a;
 export class Accounts {
   constructor(dir, key, { live = false, clientFactory = () => new Fizikal(), now = () => Date.now(), workers = true } = {}) {
     this.dir = dir; this.key = key; this.live = live; this.clientFactory = clientFactory; this.now = now; this.workers = workers;
-    this.root = openStore(dir, key); this.contexts = new Map();
+    this.root = openStore(dir, key); this.contexts = new Map(); this.push = createPush(this.root);
     this.root.db.exec(`CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY,memberKey TEXT UNIQUE NOT NULL,name TEXT NOT NULL,createdAt INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS devices(hash TEXT PRIMARY KEY,accountId TEXT NOT NULL,expiresAt INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS devices_account ON devices(accountId);`);
@@ -20,6 +21,7 @@ export class Accounts {
     const store = openStore(resolve(this.dir, 'accounts', account.id), this.key);
     const client = this.clientFactory();
     const scheduler = new Scheduler(store, client, { live: this.live, now: this.now });
+    scheduler.onFinal = (job, status, message) => this.push.notify(store, outcomeNotice(job, status, message, scheduler.live)).catch(() => {});
     const connectSaved = scheduler.connect.bind(scheduler);
     const bookingLocks = new Set(), calendarLoads = new Map();
     scheduler.blockedKeys = bookingLocks;

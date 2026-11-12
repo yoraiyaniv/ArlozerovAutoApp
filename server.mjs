@@ -7,6 +7,7 @@ import { Accounts, sessionCookie } from './accounts.mjs';
 import { Fizikal } from './fizikal.mjs';
 import { israelDate, shiftDate, matches } from './time.mjs';
 import { singleBooking, cancelBooking } from './bookings.mjs';
+import { validSubscription } from './push.mjs';
 const root = dirname(fileURLToPath(import.meta.url));
 function send(res, code, data) { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); }
 async function body(req) {
@@ -101,6 +102,20 @@ return http.createServer(async (req, res) => {
       store.logAbEvent(abVariant(context.account.id), event);
       return send(res, 200, { ok: true });
     }
+    if (url.pathname === '/api/push/key' && req.method === 'GET') return send(res, 200, { publicKey: accounts.push.publicKey });
+    if (url.pathname === '/api/push/subscribe' && req.method === 'POST') {
+      const { subscription } = await body(req);
+      if (!validSubscription(subscription)) return send(res, 400, { error: 'This browser sent an invalid notification subscription' });
+      for (const c of accounts.contexts.values()) if (c !== context) c.store.removePush(subscription.endpoint);
+      store.addPush(subscription);
+      return send(res, 200, { ok: true });
+    }
+    if (url.pathname === '/api/push/unsubscribe' && req.method === 'POST') {
+      const { endpoint } = await body(req);
+      if (typeof endpoint !== 'string') return send(res, 400, { error: 'Invalid subscription' });
+      store.removePush(endpoint);
+      return send(res, 200, { ok: true });
+    }
     if (url.pathname === '/api/ab/report' && req.method === 'GET') {
       const report = { A: {}, B: {} };
       for (const c of accounts.contexts.values()) for (const { variant, event, count } of c.store.abCounts()) report[variant][event] = (report[variant][event] || 0) + count;
@@ -125,7 +140,7 @@ return http.createServer(async (req, res) => {
       return send(res, 200, { ok: true, ...info });
     }
     if (url.pathname === '/api/account' && req.method === 'DELETE') {
-      store.db.prepare("DELETE FROM settings WHERE key='credentials'").run(); client.session = null;
+      store.db.prepare("DELETE FROM settings WHERE key='credentials'").run(); store.db.prepare('DELETE FROM push_subs').run(); client.session = null;
       for (const rule of store.rules()) { rule.enabled = false; store.db.prepare('UPDATE rules SET data=? WHERE id=?').run(JSON.stringify(rule), rule.id); }
       store.db.prepare("UPDATE jobs SET status='cancelled',message='Account disconnected' WHERE status IN ('pending','retry')").run();
       accounts.revokeAll(context.account.id); res.setHeader('Set-Cookie', sessionCookie('', secure));

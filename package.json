@@ -3,10 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "start": "node --env-file-if-exists=.env server.mjs",
     "test": "node --test",
     "check": "node --check server.mjs && node --check fizikal.mjs && node --check scheduler.mjs && node --check public/app.js"
+  },
+  "dependencies": {
+    "web-push": "3.6.7"
   }
 }

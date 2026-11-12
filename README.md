@@ -4,10 +4,11 @@ A personal, multi-account app for Arlozorov 97. Displays Fizikal's live schedule
 
 ## Run locally
 
-Requires Node.js 24 or newer. No external packages or installation are needed.
+Requires Node.js 24 or newer. Run `npm install` once; the only dependency is `web-push`, used for notifications.
 
 ```powershell
 cd arlo-auto
+npm install
 node --env-file-if-exists=.env server.mjs
 ```
 
@@ -30,7 +31,7 @@ To enable actual registration, copy `.env.example` to `.env`, change `BOOKING_EN
 
 ## Future cloud deployment
 
-The Dockerfile runs the app with no package install. Use **one always-on replica**, disable sleeping, and mount a persistent volume at `/data`. Configure:
+The Dockerfile installs the production dependency with `npm ci`. Use **one always-on replica**, disable sleeping, and mount a persistent volume at `/data`. Configure:
 
 | Variable | Value |
 | --- | --- |
@@ -66,6 +67,12 @@ Register opens a choice between Just this class (immediate, subject to club avai
 ## Schedule performance
 
 The schedule loads only the selected day. Loaded days are retained in the browser, and successful snapshots persist on the server. Saved snapshots render immediately; snapshots older than 30 seconds refresh in the background and are labelled saved. Refresh explicitly requests an updated day, retaining the previous snapshot if the club times out. Background schedule scans use at most three daily requests concurrently. Calendar responses are shared and reused for 15 seconds in the club adapter; booking and cancellation invalidate that cache. Mutation confirmation reads the member bookings endpoint instead of refetching the full schedule.
+
+## Notifications
+
+Account → Turn on notifications subscribes this phone to web push. Every final booking result (registered, waitlisted, failed, missed, cancelled) sends a notification, even when the app is closed. In preview mode a missed window is reported as "not booked: automatic booking is paused". Tapping a notification opens Booking activity.
+
+On iPhone, push works only from the app installed to the Home Screen (iOS 16.4 or newer) and the permission prompt must come from a tap inside it. Push needs HTTPS, so it works on localhost and on the deployed app, not on a plain-HTTP LAN address. VAPID keys are generated on first start and stored encrypted in the root database (preserve the data volume and `ENCRYPTION_KEY`; if lost, phones simply turn notifications on again). Optionally set `VAPID_SUBJECT` to a `mailto:` or `https:` contact URL. Only genuine browser push-service endpoints are accepted. Signing out or disconnecting removes this phone's subscription, and one phone is only ever subscribed to one account.
 
 ## Personal accounts and persistent phones
 
